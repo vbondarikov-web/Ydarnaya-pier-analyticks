@@ -6,7 +6,8 @@ from datetime import datetime, date
 import re
 import warnings
 import streamlit as st
-
+import io
+import requests
 warnings.filterwarnings('ignore')
 
 # === Streamlit UI с мобильной оптимизацией ===
@@ -16,15 +17,15 @@ st.title("📊 Аналитика причала 'Ударная'")
 # Мобильные стили
 st.markdown("""
 <style>
-    .main .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
-    .stMetric {
-        background-color: #f0f2f6;
-        padding: 10px;
-        border-radius: 10px;
-    }
+.main .block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+}
+.stMetric {
+    background-color: #f0f2f6;
+    padding: 10px;
+    border-radius: 10px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -39,86 +40,109 @@ with col2:
 
 @st.cache_data(ttl=300)
 def load_and_process_data():
-    url = 'https://docs.google.com/spreadsheets/d/1XfkLtNzsbtFLGllkd2yMG7lLyPYPOrJ0faaDRjGGhEM/edit?gid=0#gid=0'
+    # Исправленная ссылка для экспорта Google Sheets как CSV
+    sheet_id = '1XfkLtNzsbtFLGllkd2yMG7lLyPYPOrJ0faaDRjGGhEM'
+    gid = '0'
+    csv_url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
+    
     try:
-        df = pd.read_csv(url)
+        # Пробуем загрузить с разными настройками
+        try:
+            df = pd.read_csv(csv_url)
+        except:
+            # Если не получилось, пробуем с другими разделителями
+            response = requests.get(csv_url)
+            response.raise_for_status()
+            
+            # Пробуем разные разделители
+            for sep in [',', ';', '\t']:
+                try:
+                    df = pd.read_csv(io.StringIO(response.text), sep=sep, engine='python')
+                    break
+                except:
+                    continue
+            else:
+                # Если всё ещё не получилось, пробуем с engine='python'
+                df = pd.read_csv(csv_url, sep=None, engine='python')
+        
         st.success("✅ Данные загружены")
+        return df
+        
     except Exception as e:
         st.error(f"❌ Ошибка загрузки: {e}")
         return None
 
-    # Нормализация названий столбцов
-    def normalize_column_names(df):
-        df.columns = df.columns.str.lower().str.replace('ё', 'е').str.replace('c', 'с', regex=False)
-        df.columns = df.columns.str.strip()
-        return df
-    
-    df = normalize_column_names(df)
-
-    # Сопоставление колонок
-    required_columns = ['судно', 'дата принятия на пирс', 'дата отгрузки авто',
-                        'перевозчик', 'номер авто', 'тн', 'клиент', '№ сертиф.', 'брутто']
-    column_mapping = {}
-    
-    for req_col in required_columns:
-        matched = False
-        for avail_col in df.columns:
-            if req_col == avail_col or req_col in avail_col:
-                column_mapping[req_col] = avail_col
-                matched = True
-                break
-        if not matched:
-            column_mapping[req_col] = req_col
-
-    for standard_name, actual_name in column_mapping.items():
-        if actual_name in df.columns:
-            df[standard_name] = df[actual_name]
-        else:
-            df[standard_name] = np.nan
-
-    # Преобразование дат
-    def parse_date(date_str):
-        if pd.isna(date_str) or date_str == '' or str(date_str).strip() == 'nan':
-            return pd.NaT
-        try:
-            return datetime.strptime(str(date_str).strip(), '%d.%m.%Y')
-        except:
-            try:
-                return pd.to_datetime(date_str)
-            except:
-                return pd.NaT
-
-    df['дата_принятия_на_пирс'] = df['дата принятия на пирс'].apply(parse_date)
-    df['дата_отгрузки_авто'] = df['дата отгрузки авто'].apply(parse_date)
-
-    # Преобразование чисел
-    def safe_convert_to_float(x):
-        if pd.isna(x) or x == '' or str(x).strip() == 'nan':
-            return np.nan
-        try:
-            x_str = str(x).replace(',', '.').strip()
-            return float(x_str)
-        except:
-            return np.nan
-
-    df['брутто'] = df['брутто'].apply(safe_convert_to_float)
-
-    # Преобразование текста
-    def safe_str_convert(x):
-        if pd.isna(x) or x == '' or str(x).strip() == 'nan':
-            return ''
-        return str(x).strip()
-
-    text_columns = ['судно', 'перевозчик', 'номер авто', 'тн', 'клиент', '№ сертиф.']
-    for col in text_columns:
-        if col in df.columns:
-            df[col] = df[col].apply(safe_str_convert)
-
-    return df
-
 df = load_and_process_data()
+
 if df is None:
     st.stop()
+
+# Нормализация названий столбцов
+def normalize_column_names(df):
+    df.columns = df.columns.str.lower().str.replace('ё', 'е').str.replace('c', 'с', regex=False)
+    df.columns = df.columns.str.strip()
+    return df
+
+df = normalize_column_names(df)
+
+# Сопоставление колонок
+required_columns = ['судно', 'дата принятия на пирс', 'дата отгрузки авто',
+                   'перевозчик', 'номер авто', 'тн', 'клиент', '№ сертиф.', 'брутто']
+column_mapping = {}
+
+for req_col in required_columns:
+    matched = False
+    for avail_col in df.columns:
+        if req_col == avail_col or req_col in avail_col:
+            column_mapping[req_col] = avail_col
+            matched = True
+            break
+    if not matched:
+        column_mapping[req_col] = req_col
+
+for standard_name, actual_name in column_mapping.items():
+    if actual_name in df.columns:
+        df[standard_name] = df[actual_name]
+    else:
+        df[standard_name] = np.nan
+
+# Преобразование дат
+def parse_date(date_str):
+    if pd.isna(date_str) or date_str == '' or str(date_str).strip() == 'nan':
+        return pd.NaT
+    try:
+        return datetime.strptime(str(date_str).strip(), '%d.%m.%Y')
+    except:
+        try:
+            return pd.to_datetime(date_str)
+        except:
+            return pd.NaT
+
+df['дата_принятия_на_пирс'] = df['дата принятия на пирс'].apply(parse_date)
+df['дата_отгрузки_авто'] = df['дата отгрузки авто'].apply(parse_date)
+
+# Преобразование чисел
+def safe_convert_to_float(x):
+    if pd.isna(x) or x == '' or str(x).strip() == 'nan':
+        return np.nan
+    try:
+        x_str = str(x).replace(',', '.').strip()
+        return float(x_str)
+    except:
+        return np.nan
+
+df['брутто'] = df['брутто'].apply(safe_convert_to_float)
+
+# Преобразование текста
+def safe_str_convert(x):
+    if pd.isna(x) or x == '' or str(x).strip() == 'nan':
+        return ''
+    return str(x).strip()
+
+text_columns = ['судно', 'перевозчик', 'номер авто', 'тн', 'клиент', '№ сертиф.']
+for col in text_columns:
+    if col in df.columns:
+        df[col] = df[col].apply(safe_str_convert)
 
 # === Подготовка данных ===
 today = pd.to_datetime(date.today())
@@ -130,7 +154,6 @@ in_transit = df[(df['дата_принятия_на_пирс'].isna()) & (df['д
 
 # === Ключевые метрики ===
 st.header("📈 Ключевые показатели")
-
 col1, col2, col3 = st.columns(3)
 with col1:
     total_shipped = shipped['брутто'].sum()
@@ -173,25 +196,25 @@ fig_clients = go.Figure()
 
 # Добавляем только клиентов с ненулевыми значениями для каждого статуса
 fig_clients.add_trace(go.Bar(
-    name='Отгружено', 
-    x=clients_with_shipped['клиент'], 
-    y=clients_with_shipped['отгружено'], 
+    name='Отгружено',
+    x=clients_with_shipped['клиент'],
+    y=clients_with_shipped['отгружено'],
     marker_color='#FF6B6B',
     hovertemplate='<b>%{x}</b><br>Отгружено: %{y:,.1f} т<extra></extra>'
 ))
 
 fig_clients.add_trace(go.Bar(
-    name='На причале', 
-    x=clients_with_on_pier['клиент'], 
-    y=clients_with_on_pier['на_причале'], 
+    name='На причале',
+    x=clients_with_on_pier['клиент'],
+    y=clients_with_on_pier['на_причале'],
     marker_color='#4ECDC4',
     hovertemplate='<b>%{x}</b><br>На причале: %{y:,.1f} т<extra></extra>'
 ))
 
 fig_clients.add_trace(go.Bar(
-    name='В транзите', 
-    x=clients_with_in_transit['клиент'], 
-    y=clients_with_in_transit['в_транзите'], 
+    name='В транзите',
+    x=clients_with_in_transit['клиент'],
+    y=clients_with_in_transit['в_транзите'],
     marker_color='#45B7D1',
     hovertemplate='<b>%{x}</b><br>В транзите: %{y:,.1f} т<extra></extra>'
 ))
@@ -250,7 +273,6 @@ with st.expander("📋 Детальная таблица по всем клие�
 
 # === 2. Отгрузка за сегодня ===
 st.header("📅 Сегодняшние отгрузки")
-
 shipped_today = shipped[shipped['дата_отгрузки_авто'].dt.date == today.date()]
 shipped_today_by_client = shipped_today.groupby('клиент')['брутто'].sum().reset_index()
 shipped_today_by_client = shipped_today_by_client.sort_values('брутто', ascending=False)
@@ -258,13 +280,12 @@ shipped_today_by_client = shipped_today_by_client.sort_values('брутто', as
 if len(shipped_today_by_client) > 0:
     # Показываем только клиентов с ненулевыми отгрузками сегодня
     active_today_clients = shipped_today_by_client[shipped_today_by_client['брутто'] > 0]
-    
     if len(active_today_clients) > 0:
-        fig_today = px.bar(active_today_clients, x='клиент', y='брутто', 
+        fig_today = px.bar(active_today_clients, x='клиент', y='брутто',
                           title=f"Отгрузки за {today.strftime('%d.%m.%Y')}",
                           color='брутто', color_continuous_scale='Viridis')
         fig_today.update_layout(
-            height=400, 
+            height=400,
             margin=dict(t=40, b=100, l=50, r=30),
             xaxis_tickangle=-45,
             showlegend=False
@@ -311,7 +332,7 @@ if len(monthly_stats) > 0:
                                 marker_color='#FF6B6B'))
     
     fig_monthly.update_layout(
-        height=400, 
+        height=400,
         margin=dict(t=40, b=80, l=50, r=150),  # Увеличено правое поле для большой легенды
         xaxis_tickangle=-45,
         barmode='group',
@@ -335,6 +356,7 @@ if len(monthly_stats) > 0:
             itemsizing="constant"
         )
     )
+    
     st.plotly_chart(fig_monthly, use_container_width=True)
     
     # График уникальных клиентов по месяцам
@@ -342,7 +364,7 @@ if len(monthly_stats) > 0:
                                  title='Количество уникальных клиентов по месяцам',
                                  markers=True)
     fig_clients_monthly.update_layout(
-        height=300, 
+        height=300,
         margin=dict(t=40, b=50, l=50, r=30),
         showlegend=False
     )
@@ -366,7 +388,7 @@ if len(top_clients) > 0:
                     title="Топ-15 клиентов по общему тоннажу",
                     color='общий_вес', color_continuous_scale='Blues')
     fig_top.update_layout(
-        height=500, 
+        height=500,
         margin=dict(t=40, b=20, l=150, r=30),
         showlegend=False
     )
@@ -407,8 +429,9 @@ if len(vessel_stats) > 0:
     fig_vessels = px.bar(vessel_stats, x='общий_тоннаж', y='судно', orientation='h',
                         title="Топ-10 судов по тоннажу",
                         color='количество_заходов', color_continuous_scale='Greens')
+    
     fig_vessels.update_layout(
-        height=400, 
+        height=400,
         margin=dict(t=40, b=20, l=150, r=150),  # Увеличено правое поле для большой легенды
         showlegend=True,
         legend=dict(
@@ -439,6 +462,7 @@ if len(vessel_stats) > 0:
             )
         )
     )
+    
     st.plotly_chart(fig_vessels, use_container_width=True)
 else:
     st.info("Нет данных о судах")
@@ -446,22 +470,21 @@ else:
 # === Информация ===
 with st.expander("📖 Пояснение показателей"):
     st.markdown("""
-    ### 📌 Пояснение показателей:
-    
-    - **Отгружено** — груз, который уже был отгружен с причала
-    - **На причале** — принятый груз, который еще не отгружен  
-    - **В транзите** — груз в пути к причалу
-    
-    ### 💡 Особенности отображения:
-    - Клиенты с нулевыми значениями автоматически скрываются при переключении легенды
-    - Это помогает сосредоточиться на активных данных
-    - Все клиенты сохраняются в детальной таблице
-    
-    ### 📊 Метрики:
-    - **Тоннаж** измеряется в тоннах (т)
-    - **Динамика** показывает изменения по месяцам
-    - **Уникальные клиенты** — количество разных клиентов в месяце
-    """)
+### 📌 Пояснение показателей:
+- **Отгружено** — груз, который уже был отгружен с причала
+- **На причале** — принятый груз, который еще не отгружен
+- **В транзите** — груз в пути к причалу
+
+### 💡 Особенности отображения:
+- Клиенты с нулевыми значениями автоматически скрываются при переключении легенды
+- Это помогает сосредоточиться на активных данных
+- Все клиенты сохраняются в детальной таблице
+
+### 📊 Метрики:
+- **Тоннаж** измеряется в тоннах (т)
+- **Динамика** показывает изменения по месяцам
+- **Уникальные клиенты** — количество разных клиентов в месяце
+""")
 
 # Статус загрузки
 st.success(f"✅ Данные актуальны на {datetime.now().strftime('%H:%M %d.%m.%Y')}")
