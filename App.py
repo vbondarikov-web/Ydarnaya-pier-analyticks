@@ -319,7 +319,7 @@ monthly_shipments = shipment_data.groupby('год_месяц').agg({
     'клиент': 'nunique'
 }).reset_index()
 monthly_shipments.columns = ['месяц', 'отгружено_тонн', 'уникальных_клиентов']
-monthly_shipments['месяц'] = monthly_shipments['месяц'].astype(str)
+monthly_shipments['месяц'] = monthly_shipments['месяц'].apply(lambda x: x.strftime('%B %Y'))
 
 monthly_stats = pd.merge(monthly_arrivals, monthly_shipments, on='месяц', how='outer').fillna(0)
 
