@@ -157,13 +157,13 @@ st.header("📈 Ключевые показатели")
 col1, col2, col3 = st.columns(3)
 with col1:
     total_shipped = shipped['брутто'].sum()
-    st.metric("Всего отгружено", f"{total_shipped:,.0f} т")
+    st.metric("Всего отгружено", f"{total_shipped:.0f} т")
 with col2:
     total_on_pier = on_pier['брутто'].sum()
-    st.metric("На причале", f"{total_on_pier:,.0f} т")
+    st.metric("На причале", f"{total_on_pier:.0f} т")
 with col3:
     total_transit = in_transit['брутто'].sum()
-    st.metric("В транзите", f"{total_transit:,.0f} т")
+    st.metric("В транзите", f"{total_transit:.0f} т")
 
 # === 1. Объёмы по клиентам (ВСЕ клиенты) ===
 st.header("👥 Объёмы по клиентам")
@@ -310,7 +310,7 @@ monthly_arrivals = arrival_data.groupby('год_месяц').agg({
     '№ сертиф.': 'count'
 }).reset_index()
 monthly_arrivals.columns = ['месяц', 'принято_тонн', 'принято_мест']
-monthly_arrivals['месяц'] = monthly_arrivals['месяц'].astype(str)
+monthly_arrivals['месяц'] = monthly_arrivals['месяц'].apply(lambda x: x.strftime('%B %Y'))
 
 shipment_data = df[df['дата_отгрузки_авто'].notna()].copy()
 shipment_data['год_месяц'] = shipment_data['дата_отгрузки_авто'].dt.to_period('M')
